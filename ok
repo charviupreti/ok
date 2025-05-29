@@ -1,0 +1,200 @@
+import cv2
+import numpy as np
+import os
+
+import easyocr
+import os
+
+reader = easyocr.Reader(["en"])
+
+
+def point_in_rectangle(pt, rect):
+    (x1, y1), (x2, y2) = rect
+    return x1 <= pt[0] <= x2 and y1 <= pt[1] <= y2
+
+
+def check_if_arrow_present(x, y, w, h, file_path, text):
+    # take_region_screenshot(x, y - 70, x + h, y + w)
+    methods = ["cv2.TM_CCOEFF","cv2.TM_CCOEFF_NORMED","cv2.TM_CCORR_NORMED","cv2.TM_SQDIFF","cv2.TM_SQDIFF_NORMED",]
+    invalid_top = -1
+    invalid_left = -1
+    img2 = cv2.imread(file_path, 0)
+    if x - 30 > 0:
+        h = max(h, 8)
+        img2 = img2[y : y + h, x - 30 : x + w - 5]
+        filename = "./delete/" + file_path + "_" + text + ".png"
+        cv2.imwrite(filename, img2)
+        template = cv2.imread("arrowicon.png", 0)
+
+        w, h = template.shape[::-1]
+        left = []
+        top = []
+        max_confidence = 0
+
+        for meth in methods:
+            img = img2.copy()
+            method = eval(meth)
+
+            # Apply template Matching
+            res = cv2.matchTemplate(img, template, method)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+
+            # If the method is TM_SQDIFF or TM_SQDIFF_NORMED, take minimum
+            if method in [cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]:
+                top_left = min_loc
+            else:
+                top_left = max_loc
+            bottom_right = (top_left[0] + w, top_left[1] + h)
+
+            left.append(top_left[0])
+            top.append(top_left[1])
+
+            if method in [cv2.TM_CCOEFF_NORMED]:
+                max_confidence = max_val
+
+        left_mod = max(set(left), key=left.count)
+        top_mod = max(set(top), key=top.count)
+
+        print(left_mod, top_mod, max_confidence, text)
+        return max_confidence > 0.88
+
+    return False
+
+
+def extract_text_and_classify(file_path, rectangles):
+    img_color = cv2.imread(file_path)
+    text_inside = []
+    text_outside = []
+    output_signals = []
+
+    results = reader.readtext(img_color)
+
+    for bbox, text, conf in results:
+        x_coords = [pt[0] for pt in bbox]
+        y_coords = [pt[1] for pt in bbox]
+        x, y, w, h = (
+            int(min(x_coords)),
+            int(min(y_coords)),
+            int(max(x_coords) - min(x_coords)),
+            int(max(y_coords) - min(y_coords)),
+        )
+        center = (x + w // 2, y + h // 2)
+        label = f"{text} ({round(conf * 100)}%)"
+
+        inside = False
+        for rect in rectangles:
+            (r1, r2) = rect
+            rect_coords = ((r1[1], r1[0]), (r2[1], r2[0]))
+            if point_in_rectangle(center, rect_coords):
+                # text_inside.append((text, (x, y, w, h), conf))
+                text_inside.append(text)
+                # cv2.rectangle(img_color, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                # cv2.putText(img_color, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                inside = True
+                break
+
+        if not inside:
+            # text_outside.append((text, (x, y, w, h), conf))
+            if check_if_arrow_present(x, y, w, h, file_path, text):
+                output_signals.append(text)
+            else:
+                text_outside.append(text)
+
+            # cv2.rectangle(img_color, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            # cv2.putText(img_color, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+    return text_inside, text_outside, output_signals, img_color
+
+
+def find_if_rectangle_exists(file_name):
+    count = 0
+    imgpath = f"./input/{file_name}"
+    all_rectangles = []
+    visited = []
+    print(imgpath)
+    img2 = cv2.imread(imgpath, 0)
+    _, img = cv2.threshold(img2, 220, 255, cv2.THRESH_BINARY)
+
+    height, width = img.shape
+
+    for x in range(height):
+        for y in range(width):
+            if img[x][y] == 0 and (x, y) not in visited:
+                visited_temp = [(x, y)]
+
+                ytemp = y + 1
+                while ytemp < width and img[x][ytemp] == 0:
+                    visited_temp.append((x, ytemp))
+                    ytemp += 1
+                ytemp -= 1
+
+                xtemp = x + 1
+                while xtemp < height and img[xtemp][ytemp] == 0:
+                    visited_temp.append((xtemp, ytemp))
+                    xtemp += 1
+                xtemp -= 1
+
+                bottom_right = (xtemp, ytemp)
+
+                ytemp2 = ytemp - 1
+                while ytemp2 >= 0 and img[xtemp][ytemp2] == 0:
+                    visited_temp.append((xtemp, ytemp2))
+                    ytemp2 -= 1
+                ytemp2 += 1
+
+                xtemp2 = xtemp - 1
+                while xtemp2 >= 0 and img[xtemp2][ytemp2] == 0:
+                    visited_temp.append((xtemp2, ytemp2))
+                    xtemp2 -= 1
+                xtemp2 += 1
+
+                if abs(xtemp2 - xtemp) <= 2:
+                    xtemp2 = xtemp - 1
+                    ytemp2 -= 1
+                    while xtemp2 >= 0 and img[xtemp2][ytemp2] == 0:
+                        visited_temp.append((xtemp2, ytemp2))
+                        xtemp2 -= 1
+                    xtemp2 += 1
+
+                if abs(xtemp2 - xtemp) <= 2:
+                    xtemp2 = xtemp - 1
+                    ytemp2 += 1
+                    while xtemp2 >= 0 and img[xtemp2][ytemp2] == 0:
+                        visited_temp.append((xtemp2, ytemp2))
+                        xtemp2 -= 1
+                    xtemp2 += 1
+
+                if abs(xtemp2 - x) <= 2 and abs(ytemp2 - y) <= 2:
+                    area = (bottom_right[0] - x) * (bottom_right[1] - y)
+                    if (
+                        bottom_right[0] - x > 10
+                        and bottom_right[1] - y > 10
+                        and area > 15
+                        and area < 2000
+                    ):
+                        # print("Rectangle starts at : ", (x, y), " ends at : ", bottom_right)
+                        all_rectangles.append([(x, y), bottom_right])
+                        count += 1
+                        visited.extend(visited_temp)
+
+    img2 = cv2.imread(imgpath, 1)
+    # _, img2 = cv2.threshold(img2, 220, 255, cv2.THRESH_BINARY)
+    text_inside, text_outside, output_signals, marked_image = extract_text_and_classify(
+        imgpath, all_rectangles
+    )
+    for i, j in all_rectangles:
+        cv2.rectangle(img2, (i[1], i[0]), (j[1], j[0]), (0, 255, 0), 2)
+
+    cv2.imwrite(f"/raid1/home/h161961/visio/temp/rectangles/{file_name}", img2)
+    # print(f"total rectangles : {count}")
+
+    return text_inside, text_outside, output_signals
+
+
+file_names = os.listdir("./input")
+for file_name in file_names:
+    inside, outside, output_signals = find_if_rectangle_exists(file_name)
+
+print("Inside", inside)
+print("Outside",outside)
+print("output signals",output_signals)
