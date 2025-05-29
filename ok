@@ -1,66 +1,24 @@
-
 from math import sqrt
 
-def nearby(text_box,switch_boxes):
-    #print(text_box,switch_boxes)
-    tx,ty,tw,th=text_box
-    text_center = (tx+tw//2,ty+th//2)
-    #print(text_center)
-    
-    for (x1,y1,x2,y2) in switch_boxes:
-        switch_center=((x1+x2)//2,(y1+y2)//2)
-        #print(switch_center)
-        dist =sqrt(abs(text_center[0]-switch_center[0]))**2 + sqrt(abs(text_center[1]-switch_center[1]))**2
-        #print("Distance is:",dist)
-        if dist<125:
-            return True
-        else:
-            return False 
+def nearby(text_box, switch_boxes):
+    tx, ty, tw, th = text_box
+    text_rect_points = [
+        (tx, ty), (tx + tw, ty),  # top-left, top-right
+        (tx, ty + th), (tx + tw, ty + th)  # bottom-left, bottom-right
+    ]
 
-switch_boxes=[]
+    for (x1, y1, x2, y2) in switch_boxes:
+        switch_rect_points = [
+            (x1, y1), (x2, y1),
+            (x1, y2), (x2, y2)
+        ]
 
-# Process each image in the directory
-for image_file in os.listdir(image_dir):
-    # Class instance counters - numbering the apperence
-    # class_counts = defaultdict(int)
-    if image_file.lower().endswith((".png")):
-        image_path = os.path.join(image_dir, image_file)
-        img = cv2.imread(image_path)
-        if img is None:
-            continue
-
-        results = model([img], conf=0.1)  # Run inference on the image
-
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])  # Get box coordinates
-                switch_boxes.append((x1,y1,x2,y2))
-                cls = int(box.cls[0])  # Get class ID
-                class_name = model.names[cls]  # Get class name
-                try:
-                    color = class_colors[cls]
-                except IndexError:
-                    color = (255, 255, 255)
-
-
-                # class_counts[class_name] += 1
-                # numbered_label = f"{cls}_{class_counts[class_name]}"
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
-                # cv2.putText(img, numbered_label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-        # Save the modified image
-        output_path = os.path.join(results_dir, image_file)
-        cv2.imwrite(output_path, img)
-
-switch_conditions =[]
-input_signals=[]
-
-for i in outside:
-    if nearby(i[1],switch_boxes):
-        switch_conditions.append(i[0])
-    else:
-        input_signals.append(i[0])        
-
-print("Switch Conditions:",switch_conditions)
-print("Input Signals",input_signals)
-print("output_Signals",output_signals)
+        # Compute minimum distance between any text box corner and any switch box corner
+        for tx_pt in text_rect_points:
+            for sw_pt in switch_rect_points:
+                dx = tx_pt[0] - sw_pt[0]
+                dy = tx_pt[1] - sw_pt[1]
+                dist = sqrt(dx * dx + dy * dy)
+                if dist < 50:  # threshold can be tuned (50px here)
+                    return True
+    return False
